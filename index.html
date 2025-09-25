@@ -1,198 +1,52 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fuel Voucher Management</title>
-<style>
-  body { font-family: Arial,sans-serif; padding: 24px; background:#f5f6f8; }
-  h1 { color: #072760; }
-  select,input,button { width:100%; padding:8px; margin-top:5px; }
-  button { background:#0F99DA; color:white; border:none; cursor:pointer; margin-top:15px; }
-  button:hover { background:#072760; }
-  #status { margin-top:15px; font-weight:bold; }
-  .export-panel { margin-top:30px; padding:15px; border:1px solid #ccc; border-radius:8px; background:#fff; }
-</style>
-</head>
-<body>
-<h1>Fuel Voucher Management</h1>
+<h2>Today's Fuel Report</h2>
+<table id="todayReport" border="1" style="width:100%; border-collapse:collapse;">
+  <thead>
+    <tr>
+      <th>Driver</th>
+      <th>Vehicle</th>
+      <th>Amount (R)</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+<p id="totalToday"></p>
 
-<form id="voucherForm">
-  <label for="driver">Driver:</label>
-  <select id="driver" required>
-    <option value="">Loading drivers…</option>
-  </select>
-
-  <label for="vehicle">Vehicle:</label>
-  <select id="vehicle" required>
-    <option value="">Loading vehicles…</option>
-  </select>
-
-  <label for="amount">Fuel Amount (R):</label>
-  <input type="number" id="amount" required min="50">
-
-  <button type="submit">Send Voucher</button>
-</form>
-
-<p id="status"></p>
-
-<div class="export-panel">
-  <h3>Export Fuel Vouchers</h3>
-  <label for="dateRange">Date Range:</label>
-  <select id="dateRange">
-    <option value="today">Today</option>
-    <option value="week">This Week</option>
-    <option value="month">This Month</option>
-    <option value="custom">Custom</option>
-  </select>
-
-  <input type="date" id="startDate" style="display:none;" />
-  <input type="date" id="endDate" style="display:none;" />
-
-  <label for="fileType">File Type:</label>
-  <select id="fileType">
-    <option value="excel">Excel</option>
-    <option value="pdf">PDF</option>
-  </select>
-
-  <button id="exportBtn">Export</button>
-</div>
-
-<!-- Firebase SDK -->
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getFirestore, collection, getDocs, addDoc, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+async function loadTodaysReport() {
+  const today = new Date();
+  today.setHours(0,0,0,0); // start of today
+  const vouchersSnap = await getDocs(collection(db, "fuel_vouchers"));
+  let total = 0;
+  const driverCount = {}; // count tokens per driver
 
-// TODO: Replace with your Firebase config
-const firebaseConfig = {
-  apiKey: "YOUR_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "xxxx",
-  appId: "xxxx"
-};
+  const tbody = document.querySelector("#todayReport tbody");
+  tbody.innerHTML = "";
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-// Load drivers and vehicles
-async function loadDriversAndVehicles() {
-  const driversSnap = await getDocs(collection(db, "drivers"));
-  const driverSelect = document.getElementById("driver");
-  driverSelect.innerHTML = "";
-  driversSnap.forEach(doc => {
-    const d = doc.data();
-    const option = document.createElement("option");
-    option.value = doc.id;
-    option.textContent = `${d.name} (${d.phone})`;
-    driverSelect.appendChild(option);
-  });
-
-  const vehiclesSnap = await getDocs(collection(db, "vehicles"));
-  const vehicleSelect = document.getElementById("vehicle");
-  vehicleSelect.innerHTML = "";
-  vehiclesSnap.forEach(doc => {
+  vouchersSnap.forEach(doc => {
     const v = doc.data();
-    const option = document.createElement("option");
-    option.value = doc.id;
-    option.textContent = v.registration || v.reg_number;
-    vehicleSelect.appendChild(option);
+    const vDate = v.date.toDate();
+    if (vDate >= today) {
+      total += v.amountRand;
+      driverCount[v.driverId] = (driverCount[v.driverId] || 0) + 1;
+
+      const row = document.createElement("tr");
+      const status = v.amountRand > 1000 ? "⚠️ High" :
+                     driverCount[v.driverId] > 1 ? "⚠️ 2nd token" : "OK";
+
+      row.innerHTML = `
+        <td>${v.driverId}</td>
+        <td>${v.vehicleId}</td>
+        <td>${v.amountRand}</td>
+        <td>${status}</td>
+      `;
+      tbody.appendChild(row);
+    }
   });
+
+  document.getElementById("totalToday").innerText = `Total fuel issued today: R${total}`;
 }
 
-// Submit voucher
-document.getElementById("voucherForm").addEventListener("submit", async (e)=>{
-  e.preventDefault();
-  const driverId = document.getElementById("driver").value;
-  const vehicleId = document.getElementById("vehicle").value;
-  const amount = parseFloat(document.getElementById("amount").value);
-
-  if(!driverId || !vehicleId || !amount){
-    document.getElementById("status").innerText = "Please fill all fields.";
-    return;
-  }
-  if(amount > 1000){
-    if(!confirm(`Amount exceeds R1000. Are you sure?`)) return;
-  }
-
-  // Check if driver already has a voucher today
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const vouchersQuery = query(collection(db, "fuel_vouchers"),
-    where("driverId", "==", driverId)
-  );
-  const snap = await getDocs(vouchersQuery);
-  let alreadyToday = false;
-  snap.forEach(doc=>{
-    const data = doc.data();
-    const date = data.date?.toDate ? data.date.toDate() : new Date(data.date);
-    if(date >= today) alreadyToday = true;
-  });
-  if(alreadyToday && !confirm("Driver already has a voucher today. Continue?")) return;
-
-  await addDoc(collection(db, "fuel_vouchers"), {
-    driverId, vehicleId, amountRand: amount, date: new Date()
-  });
-
-  document.getElementById("status").innerText = "✅ Voucher created successfully!";
-  document.getElementById("voucherForm").reset();
-});
-
-// Export functionality
-document.getElementById("exportBtn").addEventListener("click", async ()=>{
-  const range = document.getElementById("dateRange").value;
-  const type = document.getElementById("fileType").value;
-
-  let start, end;
-  const today = new Date();
-  if(range === "today"){
-    start = new Date(); start.setHours(0,0,0,0);
-    end = new Date(); end.setHours(23,59,59,999);
-  } else if(range === "week"){
-    const day = today.getDay();
-    start = new Date(today); start.setDate(today.getDate()-day);
-    start.setHours(0,0,0,0);
-    end = new Date(today); end.setHours(23,59,59,999);
-  } else if(range === "month"){
-    start = new Date(today.getFullYear(), today.getMonth(),1);
-    end = new Date(today.getFullYear(), today.getMonth()+1,0,23,59,59,999);
-  } else if(range==="custom"){
-    start = new Date(document.getElementById("startDate").value);
-    end = new Date(document.getElementById("endDate").value);
-  }
-
-  // Fetch vouchers in range
-  const vouchersSnap = await getDocs(collection(db,"fuel_vouchers"));
-  const filtered = [];
-  vouchersSnap.forEach(doc=>{
-    const data = doc.data();
-    const date = data.date?.toDate ? data.date.toDate() : new Date(data.date);
-    if(date >= start && date <= end) filtered.push(data);
-  });
-
-  // Export (simplified)
-  if(type==="excel"){
-    // Use SheetJS to export
-    import('https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js').then(XLSX=>{
-      const ws = XLSX.utils.json_to_sheet(filtered);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Vouchers");
-      XLSX.writeFile(wb, `fuel_vouchers_${range}.xlsx`);
-    });
-  } else if(type==="pdf"){
-    import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js').then(jsPDF=>{
-      const { jsPDF } = jsPDF;
-      const doc = new jsPDF();
-      filtered.forEach((row,i)=>{
-        doc.text(`${i+1}. Driver: ${row.driverId}, Vehicle: ${row.vehicleId}, Amount: R${row.amountRand}`, 10, 10+i*10);
-      });
-      doc.save(`fuel_vouchers_${range}.pdf`);
-    });
-  }
-});
-
-loadDriversAndVehicles();
+// Call this after page loads
+loadTodaysReport();
 </script>
-</body>
-</html>
