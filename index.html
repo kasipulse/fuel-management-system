@@ -1,52 +1,178 @@
-<h2>Today's Fuel Report</h2>
-<table id="todayReport" border="1" style="width:100%; border-collapse:collapse;">
-  <thead>
-    <tr>
-      <th>Driver</th>
-      <th>Vehicle</th>
-      <th>Amount (R)</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
-<p id="totalToday"></p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pakisa Fuel Voucher</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; background: #f5f6f8; }
+    h1, h2 { color: #072760; }
+    select, input, button { width:100%; padding:8px; margin-top:5px; }
+    button { background:#0F99DA; color:white; border:none; cursor:pointer; margin-top:15px; }
+    button:hover { background:#072760; }
+    #status { margin-top:15px; font-weight:bold; }
+    hr { margin: 30px 0; }
+    ul { list-style: none; padding-left: 0; }
+    ul li { margin-bottom: 5px; }
+  </style>
+</head>
+<body>
+  <h1>Pakisa Fuel Voucher</h1>
 
-<script type="module">
-async function loadTodaysReport() {
-  const today = new Date();
-  today.setHours(0,0,0,0); // start of today
-  const vouchersSnap = await getDocs(collection(db, "fuel_vouchers"));
-  let total = 0;
-  const driverCount = {}; // count tokens per driver
+  <form id="voucherForm">
+    <label for="driver">Driver:</label>
+    <select id="driver" required>
+      <option value="">Loading drivers…</option>
+    </select>
 
-  const tbody = document.querySelector("#todayReport tbody");
-  tbody.innerHTML = "";
+    <label for="vehicle">Vehicle:</label>
+    <select id="vehicle" required>
+      <option value="">Loading vehicles…</option>
+    </select>
 
-  vouchersSnap.forEach(doc => {
-    const v = doc.data();
-    const vDate = v.date.toDate();
-    if (vDate >= today) {
-      total += v.amountRand;
-      driverCount[v.driverId] = (driverCount[v.driverId] || 0) + 1;
+    <label for="amount">Fuel Amount (R):</label>
+    <input type="number" id="amount" required min="50">
 
-      const row = document.createElement("tr");
-      const status = v.amountRand > 1000 ? "⚠️ High" :
-                     driverCount[v.driverId] > 1 ? "⚠️ 2nd token" : "OK";
+    <button type="submit">Send Voucher</button>
+  </form>
 
-      row.innerHTML = `
-        <td>${v.driverId}</td>
-        <td>${v.vehicleId}</td>
-        <td>${v.amountRand}</td>
-        <td>${status}</td>
-      `;
-      tbody.appendChild(row);
+  <p id="status"></p>
+
+  <hr>
+  <h2>Today's Fuel Vouchers</h2>
+  <div id="todaysSummary">
+    <p>Total Fuel Issued Today: R<span id="totalToday">0</span></p>
+    <ul id="driversToday"></ul>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, getDocs, addDoc, query, where, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    // TODO: Replace with your Firebase config
+    const firebaseConfig = {
+      apiKey: "YOUR_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "xxxx",
+      appId: "xxxx"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    async function loadDriversAndVehicles() {
+      try {
+        // Drivers
+        const driversSnap = await getDocs(collection(db, "drivers"));
+        const driverSelect = document.getElementById("driver");
+        driverSelect.innerHTML = "";
+        if (driversSnap.empty) {
+          driverSelect.innerHTML = `<option value="">⚠️ No drivers found</option>`;
+        } else {
+          driversSnap.forEach(doc => {
+            const d = doc.data();
+            const option = document.createElement("option");
+            option.value = doc.id;
+            option.textContent = `${d.name} (${d.phone})`;
+            driverSelect.appendChild(option);
+          });
+        }
+
+        // Vehicles
+        const vehiclesSnap = await getDocs(collection(db, "vehicles"));
+        const vehicleSelect = document.getElementById("vehicle");
+        vehicleSelect.innerHTML = "";
+        if (vehiclesSnap.empty) {
+          vehicleSelect.innerHTML = `<option value="">⚠️ No vehicles found</option>`;
+        } else {
+          vehiclesSnap.forEach(doc => {
+            const v = doc.data();
+            const option = document.createElement("option");
+            option.value = doc.id;
+            option.textContent = v.registration || v.reg_number;
+            vehicleSelect.appendChild(option);
+          });
+        }
+      } catch(err) {
+        document.getElementById("status").innerText = "❌ Error loading data - check console";
+        console.error("loadDriversAndVehicles error:", err);
+      }
     }
-  });
 
-  document.getElementById("totalToday").innerText = `Total fuel issued today: R${total}`;
-}
+    document.getElementById("voucherForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const driverId = document.getElementById("driver").value;
+      const vehicleId = document.getElementById("vehicle").value;
+      const amount = parseFloat(document.getElementById("amount").value);
 
-// Call this after page loads
-loadTodaysReport();
-</script>
+      if (!driverId || !vehicleId || !amount) {
+        document.getElementById("status").innerText = "Please fill all fields.";
+        return;
+      }
+
+      try {
+        // Save fuel voucher
+        await addDoc(collection(db, "fuel_vouchers"), {
+          driverId,
+          vehicleId,
+          amountRand: amount,
+          date: Timestamp.now()
+        });
+
+        document.getElementById("status").innerText = "✅ Voucher created successfully!";
+        document.getElementById("voucherForm").reset();
+        loadTodaysVouchers(); // refresh today's summary
+      } catch(err) {
+        document.getElementById("status").innerText = "❌ Error: " + err.message;
+        console.error("Insert error:", err);
+      }
+    });
+
+    async function loadTodaysVouchers() {
+      const startOfDay = new Date();
+      startOfDay.setHours(0,0,0,0);
+
+      const endOfDay = new Date();
+      endOfDay.setHours(23,59,59,999);
+
+      const q = query(
+        collection(db, "fuel_vouchers"),
+        where("date", ">=", Timestamp.fromDate(startOfDay)),
+        where("date", "<=", Timestamp.fromDate(endOfDay))
+      );
+
+      const snapshot = await getDocs(q);
+      let total = 0;
+      const driversMap = {};
+
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        total += data.amountRand;
+        if(driversMap[data.driverId]) {
+          driversMap[data.driverId].count += 1;
+          driversMap[data.driverId].amount += data.amountRand;
+        } else {
+          driversMap[data.driverId] = { count: 1, amount: data.amountRand };
+        }
+      });
+
+      document.getElementById("totalToday").textContent = total.toFixed(2);
+      const ul = document.getElementById("driversToday");
+      ul.innerHTML = "";
+
+      for(const [driverId, info] of Object.entries(driversMap)) {
+        const li = document.createElement("li");
+        li.textContent = `Driver ID: ${driverId} | Vouchers: ${info.count} | Total R${info.amount.toFixed(2)}`;
+        if(info.count > 1) li.style.color = "red";
+        ul.appendChild(li);
+      }
+    }
+
+    loadDriversAndVehicles();
+    loadTodaysVouchers();
+  </script>
+</body>
+</html>
