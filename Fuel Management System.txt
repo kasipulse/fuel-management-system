@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pakisa Fuel Voucher</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; background: #f5f6f8; }
+    h1 { color: #072760; }
+    select, input, button { width:100%; padding:8px; margin-top:5px; }
+    button { background:#0F99DA; color:white; border:none; cursor:pointer; margin-top:15px; }
+    button:hover { background:#072760; }
+    #status { margin-top:15px; font-weight:bold; }
+    pre { background:#eee; padding:10px; border-radius:6px; margin-top:10px; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Pakisa Fuel Voucher</h1>
+
+  <form id="voucherForm">
+    <label for="driver">Driver:</label>
+    <select id="driver" required>
+      <option value="">Loading drivers…</option>
+    </select>
+
+    <label for="vehicle">Vehicle:</label>
+    <select id="vehicle" required>
+      <option value="">Loading vehicles…</option>
+    </select>
+
+    <label for="amount">Fuel Amount (R):</label>
+    <input type="number" id="amount" required min="50">
+
+    <button type="submit">Send Voucher</button>
+  </form>
+
+  <p id="status"></p>
+  <h3>Debug Info</h3>
+  <pre id="debug"></pre>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, getDocs, addDoc, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-functions.js";
+
+    // TODO: Replace with your Firebase config
+    const firebaseConfig = {
+      apiKey: "YOUR_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "xxxx",
+      appId: "xxxx"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const functions = getFunctions(app);
+
+    const dbg = (label, val) => {
+      document.getElementById("debug").textContent += `\n${label}: ${JSON.stringify(val,null,2)}`;
+    };
+
+    async function loadDriversAndVehicles() {
+      try {
+        // Drivers
+        const driversSnap = await getDocs(collection(db, "drivers"));
+        const driverSelect = document.getElementById("driver");
+        driverSelect.innerHTML = "";
+        if (driversSnap.empty) {
+          driverSelect.innerHTML = `<option value="">⚠️ No drivers found</option>`;
+        } else {
+          driversSnap.forEach(doc => {
+            const d = doc.data();
+            const option = document.createElement("option");
+            option.value = doc.id;
+            option.textContent = `${d.name} (${d.phone})`;
+            driverSelect.appendChild(option);
+          });
+        }
+
+        // Vehicles
+        const vehiclesSnap = await getDocs(collection(db, "vehicles"));
+        const vehicleSelect = document.getElementById("vehicle");
+        vehicleSelect.innerHTML = "";
+        if (vehiclesSnap.empty) {
+          vehicleSelect.innerHTML = `<option value="">⚠️ No vehicles found</option>`;
+        } else {
+          vehiclesSnap.forEach(doc => {
+            const v = doc.data();
+            const option = document.createElement("option");
+            option.value = doc.id;
+            option.textContent = v.registration || v.reg_number;
+            vehicleSelect.appendChild(option);
+          });
+        }
+      } catch(err) {
+        dbg("loadDriversAndVehicles error", err);
+        document.getElementById("status").innerText = "❌ Error loading data - check console";
+      }
+    }
+
+    document.getElementById("voucherForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const driverId = document.getElementById("driver").value;
+      const vehicleId = document.getElementById("vehicle").value;
+      const amount = parseFloat(document.getElementById("amount").value);
+
+      if (!driverId || !vehicleId || !amount) {
+        document.getElementById("status").innerText = "Please fill all fields.";
+        return;
+      }
+
+      try {
+        // Save fuel voucher
+        await addDoc(collection(db, "fuel_vouchers"), {
+          driverId,
+          vehicleId,
+          amountRand: amount,
+          date: Timestamp.now()
+        });
+
+        // Optional: send SMS via Cloud Function
+        // const sendSMS = httpsCallable(functions, 'sendSMS');
+        // await sendSMS({ phone: driverPhone, message: `Fuel voucher R${amount} logged` });
+
+        document.getElementById("status").innerText = "✅ Voucher created successfully!";
+        document.getElementById("voucherForm").reset();
+      } catch(err) {
+        document.getElementById("status").innerText = "❌ Error: " + err.message;
+        dbg("Insert error", err);
+      }
+    });
+
+    loadDriversAndVehicles();
+  </script>
+</body>
+</html>
