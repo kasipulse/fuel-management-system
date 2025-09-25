@@ -1,145 +1,205 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pakisa Fuel Voucher</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 24px; background: #f5f6f8; }
-    h1 { color: #072760; }
-    select, input, button { width:100%; padding:8px; margin-top:5px; }
-    button { background:#0F99DA; color:white; border:none; cursor:pointer; margin-top:15px; }
-    button:hover { background:#072760; }
-    #status { margin-top:15px; font-weight:bold; }
-    pre { background:#eee; padding:10px; border-radius:6px; margin-top:10px; white-space:pre-wrap; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fuel Management System</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 24px; background: #f5f6f8; }
+  h1 { color: #072760; }
+  select, input, button { width:100%; padding:8px; margin-top:5px; }
+  button { background:#0F99DA; color:white; border:none; cursor:pointer; margin-top:15px; }
+  button:hover { background:#072760; }
+  #status { margin-top:15px; font-weight:bold; }
+  table { width: 100%; border-collapse: collapse; margin-top:20px; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align:left; }
+  th { background: #072760; color: white; }
+  .export-buttons { margin-top:20px; }
+</style>
 </head>
 <body>
-  <h1>Pakisa Fuel Voucher</h1>
+<h1>Fuel Management System</h1>
 
-  <form id="voucherForm">
-    <label for="driver">Driver:</label>
-    <select id="driver" required>
-      <option value="">Loading drivers…</option>
-    </select>
+<form id="voucherForm">
+  <label for="driver">Driver:</label>
+  <select id="driver" required>
+    <option value="">Loading drivers…</option>
+  </select>
 
-    <label for="vehicle">Vehicle:</label>
-    <select id="vehicle" required>
-      <option value="">Loading vehicles…</option>
-    </select>
+  <label for="vehicle">Vehicle:</label>
+  <select id="vehicle" required>
+    <option value="">Loading vehicles…</option>
+  </select>
 
-    <label for="amount">Fuel Amount (R):</label>
-    <input type="number" id="amount" required min="50">
+  <label for="amount">Fuel Amount (R):</label>
+  <input type="number" id="amount" required min="50">
 
-    <button type="submit">Send Voucher</button>
-  </form>
+  <button type="submit">Send Voucher</button>
+</form>
 
-  <p id="status"></p>
-  <h3>Debug Info</h3>
-  <pre id="debug"></pre>
+<p id="status"></p>
 
-  <!-- Firebase SDK -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getFirestore, collection, getDocs, addDoc, Timestamp, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-    import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-functions.js";
+<h2>Fuel Usage</h2>
+<div class="export-buttons">
+  <button onclick="exportPDF('today')">Export Today PDF</button>
+  <button onclick="exportExcel('today')">Export Today Excel</button>
+  <button onclick="exportPDF('week')">Export Week PDF</button>
+  <button onclick="exportExcel('week')">Export Week Excel</button>
+  <button onclick="exportPDF('month')">Export Month PDF</button>
+  <button onclick="exportExcel('month')">Export Month Excel</button>
+</div>
 
-    // Replace with your Firebase config
-    const firebaseConfig = {
-      apiKey: "YOUR_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      projectId: "YOUR_PROJECT",
-      storageBucket: "YOUR_PROJECT.appspot.com",
-      messagingSenderId: "xxxx",
-      appId: "xxxx"
-    };
+<table id="fuelTable">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Driver</th>
+      <th>Vehicle</th>
+      <th>Amount (R)</th>
+    </tr>
+  </thead>
+  <tbody>
+  </tbody>
+</table>
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const functions = getFunctions(app);
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getFirestore, collection, getDocs, addDoc, query, where, Timestamp, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-    const dbg = (label, val) => {
-      document.getElementById("debug").textContent += `\n${label}: ${JSON.stringify(val,null,2)}`;
-    };
+// Replace with your Firebase config
+const firebaseConfig = {
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "xxxx",
+  appId: "xxxx"
+};
 
-    async function loadDriversAndVehicles() {
-      try {
-        // Drivers
-        const driversSnap = await getDocs(collection(db, "drivers"));
-        const driverSelect = document.getElementById("driver");
-        driverSelect.innerHTML = "";
-        if (driversSnap.empty) {
-          driverSelect.innerHTML = `<option value="">⚠️ No drivers found</option>`;
-        } else {
-          driversSnap.forEach(doc => {
-            const d = doc.data();
-            const option = document.createElement("option");
-            option.value = doc.id;
-            option.textContent = `${d.name} (${d.phone})`;
-            driverSelect.appendChild(option);
-          });
-        }
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-        // Vehicles
-        const vehiclesSnap = await getDocs(collection(db, "vehicles"));
-        const vehicleSelect = document.getElementById("vehicle");
-        vehicleSelect.innerHTML = "";
-        if (vehiclesSnap.empty) {
-          vehicleSelect.innerHTML = `<option value="">⚠️ No vehicles found</option>`;
-        } else {
-          vehiclesSnap.forEach(doc => {
-            const v = doc.data();
-            const option = document.createElement("option");
-            option.value = doc.id;
-            option.textContent = v.registration || v.reg_number;
-            vehicleSelect.appendChild(option);
-          });
-        }
-      } catch(err) {
-        dbg("loadDriversAndVehicles error", err);
-        document.getElementById("status").innerText = "❌ Error loading data - check console";
-      }
+async function loadDriversAndVehicles() {
+  const driverSelect = document.getElementById("driver");
+  const vehicleSelect = document.getElementById("vehicle");
+  driverSelect.innerHTML = "<option value=''>No drivers found</option>";
+  vehicleSelect.innerHTML = "<option value=''>No vehicles found</option>";
+
+  try {
+    const driversSnap = await getDocs(collection(db, "drivers"));
+    if (!driversSnap.empty) {
+      driverSelect.innerHTML = "";
+      driversSnap.forEach(doc => {
+        const d = doc.data();
+        const option = document.createElement("option");
+        option.value = doc.id;
+        option.textContent = `${d.name} (${d.phone})`;
+        driverSelect.appendChild(option);
+      });
     }
 
-    document.getElementById("voucherForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const driverId = document.getElementById("driver").value;
-      const vehicleId = document.getElementById("vehicle").value;
-      const amount = parseFloat(document.getElementById("amount").value);
+    const vehiclesSnap = await getDocs(collection(db, "vehicles"));
+    if (!vehiclesSnap.empty) {
+      vehicleSelect.innerHTML = "";
+      vehiclesSnap.forEach(doc => {
+        const v = doc.data();
+        const option = document.createElement("option");
+        option.value = doc.id;
+        option.textContent = v.registration || v.reg_number;
+        vehicleSelect.appendChild(option);
+      });
+    }
+  } catch(err) {
+    document.getElementById("status").innerText = "Error loading drivers/vehicles: " + err.message;
+  }
+}
 
-      if (!driverId || !vehicleId || !amount) {
-        document.getElementById("status").innerText = "Please fill all fields.";
-        return;
-      }
+async function submitVoucher(e) {
+  e.preventDefault();
+  const driverId = document.getElementById("driver").value;
+  const vehicleId = document.getElementById("vehicle").value;
+  const amount = parseFloat(document.getElementById("amount").value);
 
-      try {
-        // Save fuel voucher
-        const voucherRef = await addDoc(collection(db, "fuel_vouchers"), {
-          driverId,
-          vehicleId,
-          amountRand: amount,
-          date: Timestamp.now()
-        });
+  if (!driverId || !vehicleId || !amount) {
+    document.getElementById("status").innerText = "Please fill all fields.";
+    return;
+  }
 
-        // Fetch driver phone
-        const driverDoc = await getDoc(doc(db, "drivers", driverId));
-        const driverPhone = driverDoc.data()?.phone;
+  if (amount > 1000) {
+    document.getElementById("status").innerText = "Amount cannot exceed R1000!";
+    return;
+  }
 
-        // Send SMS via Cloud Function
-        if(driverPhone) {
-          const sendSMS = httpsCallable(functions, 'sendSMS');
-          await sendSMS({ phone: driverPhone, message: `Fuel voucher R${amount} logged for you.` });
-        }
+  const todayStart = Timestamp.fromDate(new Date(new Date().setHours(0,0,0,0)));
+  const todayEnd = Timestamp.fromDate(new Date(new Date().setHours(23,59,59,999)));
 
-        document.getElementById("status").innerText = "✅ Voucher created and SMS sent!";
-        document.getElementById("voucherForm").reset();
-      } catch(err) {
-        document.getElementById("status").innerText = "❌ Error: " + err.message;
-        dbg("Insert error", err);
-      }
+  const q = query(collection(db, "fuel_vouchers"),
+                  where("driverId", "==", driverId),
+                  where("date", ">=", todayStart),
+                  where("date", "<=", todayEnd));
+  const existing = await getDocs(q);
+
+  if (!existing.empty) {
+    document.getElementById("status").innerText = "Driver already received a token today!";
+    return;
+  }
+
+  try {
+    await addDoc(collection(db, "fuel_vouchers"), {
+      driverId, vehicleId, amountRand: amount, date: Timestamp.now()
     });
+    document.getElementById("status").innerText = "✅ Voucher created successfully!";
+    document.getElementById("voucherForm").reset();
+    loadTable();
+  } catch(err) {
+    document.getElementById("status").innerText = "Error saving voucher: " + err.message;
+  }
+}
 
-    loadDriversAndVehicles();
-  </script>
+document.getElementById("voucherForm").addEventListener("submit", submitVoucher);
+
+async function loadTable(period="today") {
+  const tbody = document.querySelector("#fuelTable tbody");
+  tbody.innerHTML = "";
+  let start, end;
+  const now = new Date();
+
+  if (period==="today") {
+    start = new Date(now.setHours(0,0,0,0));
+    end = new Date(now.setHours(23,59,59,999));
+  } else if (period==="week") {
+    const day = now.getDay(); // 0 Sunday
+    start = new Date(now);
+    start.setDate(now.getDate() - day);
+    start.setHours(0,0,0,0);
+    end = new Date(now);
+    end.setHours(23,59,59,999);
+  } else if (period==="month") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth()+1, 0, 23,59,59,999);
+  }
+
+  const q = query(collection(db, "fuel_vouchers"),
+                  where("date", ">=", Timestamp.fromDate(start)),
+                  where("date", "<=", Timestamp.fromDate(end)),
+                  orderBy("date","desc"));
+
+  const snap = await getDocs(q);
+  snap.forEach(doc => {
+    const v = doc.data();
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${v.date.toDate().toLocaleString()}</td><td>${v.driverId}</td><td>${v.vehicleId}</td><td>${v.amountRand}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// Placeholder export functions (need SheetJS/jsPDF for real export)
+function exportExcel(period) { alert("Excel export for "+period+" coming soon!"); }
+function exportPDF(period) { alert("PDF export for "+period+" coming soon!"); }
+
+loadDriversAndVehicles();
+loadTable();
+</script>
 </body>
 </html>
